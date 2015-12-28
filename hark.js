@@ -1,16 +1,24 @@
 var WildEmitter = require('wildemitter');
 
-function getMaxVolume (analyser, fftBins) {
-  var maxVolume = -Infinity;
-  analyser.getFloatFrequencyData(fftBins);
-
-  for(var i=4, ii=fftBins.length; i < ii; i++) {
-    if (fftBins[i] > maxVolume && fftBins[i] < 0) {
-      maxVolume = fftBins[i];
-    }
+function getVolume (fftBins) {
+  var ret = {
+    max: 0,
+    average: 0
   };
 
-  return maxVolume;
+  for(var i = 4, i < fftBins.length; i++) {
+    ret.average += fftBins[i];
+    if (fftBins[i] > ret.max) {
+      ret.max = fftBins[i];
+    }
+  }
+  
+  ret.average = ret.average / fftBins.length;
+  
+  ret.average /= 255;
+  ret.max /= 255;
+
+  return ret;
 }
 
 
@@ -30,7 +38,7 @@ module.exports = function(stream, options) {
       interval = (options.interval || 50),
       threshold = options.threshold,
       play = options.play,
-      history = options.history || 10,
+      history = options.history || 1h,
       running = true;
 
   //Setup Audio Context
@@ -42,18 +50,18 @@ module.exports = function(stream, options) {
   analyser = audioContext.createAnalyser();
   analyser.fftSize = 512;
   analyser.smoothingTimeConstant = smoothing;
-  fftBins = new Float32Array(analyser.fftSize);
+  fftBins = new Uint8Array(analyser.fftSize);
 
   if (stream.jquery) stream = stream[0];
   if (stream instanceof HTMLAudioElement || stream instanceof HTMLVideoElement) {
     //Audio Tag
     sourceNode = audioContext.createMediaElementSource(stream);
     if (typeof play === 'undefined') play = true;
-    threshold = threshold || -50;
+    threshold = threshold || 0.5;
   } else {
     //WebRTC Stream
     sourceNode = audioContext.createMediaStreamSource(stream);
-    threshold = threshold || -50;
+    threshold = threshold || 0.5;
   }
 
   sourceNode.connect(analyser);
@@ -71,7 +79,7 @@ module.exports = function(stream, options) {
   
   harker.stop = function() {
     running = false;
-    harker.emit('volume_change', -100, threshold);
+    harker.emit('volume_change', 0, threshold);
     if (harker.speaking) {
       harker.speaking = false;
       harker.emit('stopped_speaking');
@@ -92,7 +100,9 @@ module.exports = function(stream, options) {
         return;
       }
       
-      var currentVolume = getMaxVolume(analyser, fftBins);
+      analyser.getByteFrequencyData(fftBins);
+      var vol = getVolume(fftBins);
+      var currentVolume = vol.average;
 
       harker.emit('volume_change', currentVolume, threshold);
 
