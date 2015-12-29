@@ -7,16 +7,16 @@ function getVolume (fftBins, previousVolume, averaging) {
   };
 
   // Root mean square instead of simple average
-  for(var i = 0; i < fftBins.length; i++) {
+  for(var i = 0; i < fftBins.length - 64; i++) {
     ret.average += fftBins[i] * fftBins[i];
     if (fftBins[i] > ret.max) {
       ret.max = fftBins[i];
     }
   }
-  var rms =  Math.sqrt(ret.average / fftBins.length);
+  var rms =  Math.sqrt(ret.average / (fftBins.length - 64));
   ret.average = rms;
   
-  ret.average /= 255;
+  ret.average /= 128;
   ret.max /= 255;
   
   ret.average = Math.max(ret.average, previousVolume * averaging);
@@ -43,7 +43,7 @@ module.exports = function(stream, options) {
       play = options.play,
       history = options.history || 15,
       running = true,
-      averaging = options.averaging || 0.1;
+      averaging = options.averaging || 0.15;
 
   //Setup Audio Context
   if (!audioContext) {
@@ -52,7 +52,7 @@ module.exports = function(stream, options) {
   var sourceNode, fftBins, analyser, previousVolume = 0.0;
 
   analyser = audioContext.createAnalyser();
-  analyser.fftSize = 512;
+  analyser.fftSize = 256;
   analyser.smoothingTimeConstant = smoothing;
   fftBins = new Uint8Array(analyser.fftSize);
 
