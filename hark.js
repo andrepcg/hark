@@ -1,6 +1,6 @@
 var WildEmitter = require('wildemitter');
 
-function getVolume (fftBins) {
+function getVolume (fftBins, previousVolume, averaging) {
   var ret = {
     max: 0,
     average: 0
@@ -18,6 +18,8 @@ function getVolume (fftBins) {
   
   ret.average /= 255;
   ret.max /= 255;
+  
+  ret.average = Math.max(ret.average, previousVolume * averaging);
 
   return ret;
 }
@@ -37,16 +39,17 @@ module.exports = function(stream, options) {
   var options = options || {},
       smoothing = (options.smoothing || 0.1),
       interval = (options.interval || 50),
-      threshold = options.threshold,
+      threshold = options.threshold || 0.5,
       play = options.play,
       history = options.history || 15,
-      running = true;
+      running = true,
+      averaging = options.averaging || 0.1;
 
   //Setup Audio Context
   if (!audioContext) {
     audioContext = new audioContextType();
   }
-  var sourceNode, fftBins, analyser;
+  var sourceNode, fftBins, analyser, previousVolume;
 
   analyser = audioContext.createAnalyser();
   analyser.fftSize = 512;
@@ -102,8 +105,9 @@ module.exports = function(stream, options) {
       }
       
       analyser.getByteFrequencyData(fftBins);
-      var vol = getVolume(fftBins);
+      var vol = getVolume(fftBins, previousVolume, averaging);
       var currentVolume = vol.average;
+      previousVolume = vol.average;
 
       harker.emit('volume_change', currentVolume, threshold);
 
