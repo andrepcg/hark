@@ -2,17 +2,28 @@
 return (function(e,t,n){function i(n,s){if(!t[n]){if(!e[n]){var o=typeof require=="function"&&require;if(!s&&o)return o(n,!0);if(r)return r(n,!0);throw new Error("Cannot find module '"+n+"'")}var u=t[n]={exports:{}};e[n][0].call(u.exports,function(t){var r=e[n][1][t];return i(r?r:t)},u,u.exports)}return t[n].exports}var r=typeof require=="function"&&require;for(var s=0;s<n.length;s++)i(n[s]);return i})({1:[function(require,module,exports){
 var WildEmitter = require('wildemitter');
 
-function getMaxVolume (analyser, fftBins) {
-  var maxVolume = -Infinity;
-  analyser.getFloatFrequencyData(fftBins);
-
-  for(var i=4, ii=fftBins.length; i < ii; i++) {
-    if (fftBins[i] > maxVolume && fftBins[i] < 0) {
-      maxVolume = fftBins[i];
-    }
+function getVolume (fftBins, previousVolume, averaging) {
+  var ret = {
+    max: 0,
+    average: 0
   };
 
-  return maxVolume;
+  // Root mean square instead of simple average
+  for(var i = 0; i < fftBins.length; i++) {
+    ret.average += fftBins[i] * fftBins[i];
+    if (fftBins[i] > ret.max) {
+      ret.max = fftBins[i];
+    }
+  }
+  var rms =  Math.sqrt(ret.average / fftBins.length);
+  ret.average = rms;
+  
+  ret.average /= 255;
+  ret.max /= 255;
+  
+  ret.average = Math.max(ret.average, previousVolume * averaging);
+
+  return ret;
 }
 
 
@@ -30,32 +41,33 @@ module.exports = function(stream, options) {
   var options = options || {},
       smoothing = (options.smoothing || 0.1),
       interval = (options.interval || 50),
-      threshold = options.threshold,
+      threshold = options.threshold || 0.35,
       play = options.play,
-      history = options.history || 10,
-      running = true;
+      history = options.history || 15,
+      running = true,
+      averaging = options.averaging || 0.1;
 
   //Setup Audio Context
   if (!audioContext) {
     audioContext = new audioContextType();
   }
-  var sourceNode, fftBins, analyser;
+  var sourceNode, fftBins, analyser, previousVolume = 0.0;
 
   analyser = audioContext.createAnalyser();
   analyser.fftSize = 512;
   analyser.smoothingTimeConstant = smoothing;
-  fftBins = new Float32Array(analyser.fftSize);
+  fftBins = new Uint8Array(analyser.fftSize);
 
   if (stream.jquery) stream = stream[0];
   if (stream instanceof HTMLAudioElement || stream instanceof HTMLVideoElement) {
     //Audio Tag
     sourceNode = audioContext.createMediaElementSource(stream);
     if (typeof play === 'undefined') play = true;
-    threshold = threshold || -50;
+    threshold = threshold || 0.5;
   } else {
     //WebRTC Stream
     sourceNode = audioContext.createMediaStreamSource(stream);
-    threshold = threshold || -50;
+    threshold = threshold || 0.5;
   }
 
   sourceNode.connect(analyser);
@@ -73,7 +85,7 @@ module.exports = function(stream, options) {
   
   harker.stop = function() {
     running = false;
-    harker.emit('volume_change', -100, threshold);
+    harker.emit('volume_change', 0, threshold);
     if (harker.speaking) {
       harker.speaking = false;
       harker.emit('stopped_speaking');
@@ -94,7 +106,10 @@ module.exports = function(stream, options) {
         return;
       }
       
-      var currentVolume = getMaxVolume(analyser, fftBins);
+      analyser.getByteFrequencyData(fftBins);
+      var vol = getVolume(fftBins, previousVolume, averaging);
+      var currentVolume = vol.average;
+      previousVolume = vol.average;
 
       harker.emit('volume_change', currentVolume, threshold);
 
@@ -131,7 +146,7 @@ module.exports = function(stream, options) {
 
 },{"wildemitter":2}],2:[function(require,module,exports){
 /*
-WildEmitter.js is a slim little event emitter by @henrikjoreteg largely based 
+WildEmitter.js is a slim little event emitter by @henrikjoreteg largely based
 on @visionmedia's Emitter from UI Kit.
 
 Why? I wanted it standalone.
@@ -139,136 +154,150 @@ Why? I wanted it standalone.
 I also wanted support for wildcard emitters like this:
 
 emitter.on('*', function (eventName, other, event, payloads) {
-    
+
 });
 
 emitter.on('somenamespace*', function (eventName, payloads) {
-    
+
 });
 
-Please note that callbacks triggered by wildcard registered events also get 
+Please note that callbacks triggered by wildcard registered events also get
 the event name as the first argument.
 */
+
 module.exports = WildEmitter;
 
-function WildEmitter() {
-    this.callbacks = {};
-}
+function WildEmitter() { }
 
-// Listen on the given `event` with `fn`. Store a group name if present.
-WildEmitter.prototype.on = function (event, groupName, fn) {
-    var hasGroup = (arguments.length === 3),
-        group = hasGroup ? arguments[1] : undefined,
-        func = hasGroup ? arguments[2] : arguments[1];
-    func._groupName = group;
-    (this.callbacks[event] = this.callbacks[event] || []).push(func);
-    return this;
-};
+WildEmitter.mixin = function (constructor) {
+    var prototype = constructor.prototype || constructor;
 
-// Adds an `event` listener that will be invoked a single
-// time then automatically removed.
-WildEmitter.prototype.once = function (event, groupName, fn) {
-    var self = this,
-        hasGroup = (arguments.length === 3),
-        group = hasGroup ? arguments[1] : undefined,
-        func = hasGroup ? arguments[2] : arguments[1];
-    function on() {
-        self.off(event, on);
-        func.apply(this, arguments);
-    }
-    this.on(event, group, on);
-    return this;
-};
+    prototype.isWildEmitter= true;
 
-// Unbinds an entire group
-WildEmitter.prototype.releaseGroup = function (groupName) {
-    var item, i, len, handlers;
-    for (item in this.callbacks) {
-        handlers = this.callbacks[item];
-        for (i = 0, len = handlers.length; i < len; i++) {
-            if (handlers[i]._groupName === groupName) {
-                //console.log('removing');
-                // remove it and shorten the array we're looping through
-                handlers.splice(i, 1);
-                i--;
-                len--;
-            }
-        }
-    }
-    return this;
-};
-
-// Remove the given callback for `event` or all
-// registered callbacks.
-WildEmitter.prototype.off = function (event, fn) {
-    var callbacks = this.callbacks[event],
-        i;
-
-    if (!callbacks) return this;
-
-    // remove all handlers
-    if (arguments.length === 1) {
-        delete this.callbacks[event];
+    // Listen on the given `event` with `fn`. Store a group name if present.
+    prototype.on = function (event, groupName, fn) {
+        this.callbacks = this.callbacks || {};
+        var hasGroup = (arguments.length === 3),
+            group = hasGroup ? arguments[1] : undefined,
+            func = hasGroup ? arguments[2] : arguments[1];
+        func._groupName = group;
+        (this.callbacks[event] = this.callbacks[event] || []).push(func);
         return this;
-    }
+    };
 
-    // remove specific handler
-    i = callbacks.indexOf(fn);
-    callbacks.splice(i, 1);
-    return this;
-};
+    // Adds an `event` listener that will be invoked a single
+    // time then automatically removed.
+    prototype.once = function (event, groupName, fn) {
+        var self = this,
+            hasGroup = (arguments.length === 3),
+            group = hasGroup ? arguments[1] : undefined,
+            func = hasGroup ? arguments[2] : arguments[1];
+        function on() {
+            self.off(event, on);
+            func.apply(this, arguments);
+        }
+        this.on(event, group, on);
+        return this;
+    };
 
-/// Emit `event` with the given args.
-// also calls any `*` handlers
-WildEmitter.prototype.emit = function (event) {
-    var args = [].slice.call(arguments, 1),
-        callbacks = this.callbacks[event],
-        specialCallbacks = this.getWildcardCallbacks(event),
-        i,
-        len,
-        item,
-        listeners;
+    // Unbinds an entire group
+    prototype.releaseGroup = function (groupName) {
+        this.callbacks = this.callbacks || {};
+        var item, i, len, handlers;
+        for (item in this.callbacks) {
+            handlers = this.callbacks[item];
+            for (i = 0, len = handlers.length; i < len; i++) {
+                if (handlers[i]._groupName === groupName) {
+                    //console.log('removing');
+                    // remove it and shorten the array we're looping through
+                    handlers.splice(i, 1);
+                    i--;
+                    len--;
+                }
+            }
+        }
+        return this;
+    };
 
-    if (callbacks) {
-        listeners = callbacks.slice();
-        for (i = 0, len = listeners.length; i < len; ++i) {
-            if (listeners[i]) {
+    // Remove the given callback for `event` or all
+    // registered callbacks.
+    prototype.off = function (event, fn) {
+        this.callbacks = this.callbacks || {};
+        var callbacks = this.callbacks[event],
+            i;
+
+        if (!callbacks) return this;
+
+        // remove all handlers
+        if (arguments.length === 1) {
+            delete this.callbacks[event];
+            return this;
+        }
+
+        // remove specific handler
+        i = callbacks.indexOf(fn);
+        callbacks.splice(i, 1);
+        if (callbacks.length === 0) {
+            delete this.callbacks[event];
+        }
+        return this;
+    };
+
+    /// Emit `event` with the given args.
+    // also calls any `*` handlers
+    prototype.emit = function (event) {
+        this.callbacks = this.callbacks || {};
+        var args = [].slice.call(arguments, 1),
+            callbacks = this.callbacks[event],
+            specialCallbacks = this.getWildcardCallbacks(event),
+            i,
+            len,
+            item,
+            listeners;
+
+        if (callbacks) {
+            listeners = callbacks.slice();
+            for (i = 0, len = listeners.length; i < len; ++i) {
+                if (!listeners[i]) {
+                    break;
+                }
                 listeners[i].apply(this, args);
-            } else {
-                break;
             }
         }
-    }
 
-    if (specialCallbacks) {
-        len = specialCallbacks.length;
-        listeners = specialCallbacks.slice();
-        for (i = 0, len = listeners.length; i < len; ++i) {
-            if (listeners[i]) {
+        if (specialCallbacks) {
+            len = specialCallbacks.length;
+            listeners = specialCallbacks.slice();
+            for (i = 0, len = listeners.length; i < len; ++i) {
+                if (!listeners[i]) {
+                    break;
+                }
                 listeners[i].apply(this, [event].concat(args));
-            } else {
-                break;
             }
         }
-    }
 
-    return this;
-};
+        return this;
+    };
 
-// Helper for for finding special wildcard event handlers that match the event
-WildEmitter.prototype.getWildcardCallbacks = function (eventName) {
-    var item,
-        split,
-        result = [];
+    // Helper for for finding special wildcard event handlers that match the event
+    prototype.getWildcardCallbacks = function (eventName) {
+        this.callbacks = this.callbacks || {};
+        var item,
+            split,
+            result = [];
 
-    for (item in this.callbacks) {
-        split = item.split('*');
-        if (item === '*' || (split.length === 2 && eventName.slice(0, split[0].length) === split[0])) {
-            result = result.concat(this.callbacks[item]);
+        for (item in this.callbacks) {
+            split = item.split('*');
+            if (item === '*' || (split.length === 2 && eventName.slice(0, split[0].length) === split[0])) {
+                result = result.concat(this.callbacks[item]);
+            }
         }
-    }
-    return result;
+        return result;
+    };
+
 };
+
+WildEmitter.mixin(WildEmitter);
 
 },{}]},{},[1])(1)
 });
