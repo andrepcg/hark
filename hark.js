@@ -49,7 +49,7 @@ module.exports = function(stream, options) {
   if (!audioContext) {
     audioContext = new audioContextType();
   }
-  var sourceNode, fftBins, analyser, previousVolume;
+  var sourceNode, fftBins, analyser, previousVolume = 0.0;
 
   analyser = audioContext.createAnalyser();
   analyser.fftSize = 512;
