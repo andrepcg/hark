@@ -39,7 +39,7 @@ module.exports = function(stream, options) {
       interval = (options.interval || 50),
       threshold = options.threshold,
       play = options.play,
-      history = options.history || 1h,
+      history = options.history || 15,
       running = true;
 
   //Setup Audio Context
