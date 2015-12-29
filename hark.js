@@ -6,14 +6,15 @@ function getVolume (fftBins) {
     average: 0
   };
 
-  for(var i = 4; i < fftBins.length; i++) {
-    ret.average += fftBins[i];
+  // Root mean square instead of simple average
+  for(var i = 0; i < fftBins.length; i++) {
+    ret.average += fftBins[i] * fftBins[i];
     if (fftBins[i] > ret.max) {
       ret.max = fftBins[i];
     }
   }
-  
-  ret.average = ret.average / fftBins.length;
+  var rms =  Math.sqrt(ret.average / fftBins.length);
+  ret.average = rms;
   
   ret.average /= 255;
   ret.max /= 255;
