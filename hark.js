@@ -6,7 +6,7 @@ function getVolume (fftBins) {
     average: 0
   };
 
-  for(var i = 4, i < fftBins.length; i++) {
+  for(var i = 4; i < fftBins.length; i++) {
     ret.average += fftBins[i];
     if (fftBins[i] > ret.max) {
       ret.max = fftBins[i];
